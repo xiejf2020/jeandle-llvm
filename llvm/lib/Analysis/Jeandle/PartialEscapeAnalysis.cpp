@@ -1726,8 +1726,9 @@ private:
   // there would be a false positive on legal bytecode.
   void checkRawHeaderAccess(const Instruction *I, Value *Ptr,
                             jeandle::ObjectID BaseID);
-  // TODO(unsafe-inliner): processAtomicRMW / processCmpXchg (re-add with the
-  // jeandle-jdk frontend inliner for Unsafe atomic intrinsics),
+  // AtomicRMW and cmpxchg are handled as explicit PEA barriers below; full
+  // scalarization needs result/control-flow modeling and is intentionally
+  // deferred.
   // processArrayCopy (System.arraycopy → llvm.memcpy/memmove), processMemSet
   // (Arrays.fill → llvm.memset). Until then these shapes fall through to
   // conservative materialization.
@@ -4998,9 +4999,13 @@ void Analyzer::processInstruction(Instruction *I) {
     return;
   }
 
-  // TODO(unsafe-inliner): see the access dispatch (processStore/processLoad).
-  // atomicrmw/cmpxchg falls through to the generic-escape path below,
-  // materializing conservatively.
+  // AtomicRMW/cmpxchg are not scalarized: PEA treats them as explicit
+  // materialization barriers, preserving their atomic result and ordering.
+  if (isa<AtomicRMWInst>(I) || isa<AtomicCmpXchgInst>(I)) {
+    if (Aliases.hasVirtualInputs(I))
+      materializeAllVirtualOperands(I);
+    return;
+  }
 
   // Strict-lock cascade: under strict lock order, a REAL (non-virtualized)
   // monitorenter must first materialize every still-virtual object holding a
